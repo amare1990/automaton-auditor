@@ -1,0 +1,28 @@
+# uv / python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# env files
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+
+# coverage / test
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# LangSmith traces (large)
+audit/langsmith_logs/*.json
