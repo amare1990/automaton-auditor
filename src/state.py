@@ -1,72 +1,69 @@
-from typing import List, Dict, Optional, Literal
+from __future__ import annotations
+
+import operator
+from typing import Annotated, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
-from enum import Enum
-from datetime import datetime
+from typing_extensions import TypedDict
 
 # -----------------------------
 # Evidence Models (Detective Layer)
 # -----------------------------
 
-class EvidenceType(str, Enum):
-    CODE = "code"
-    DOC = "doc"
-    DIAGRAM = "diagram"
-    METADATA = "metadata"
-
 class Evidence(BaseModel):
-    id: str
-    type: EvidenceType
-    source: str                 # file path, PDF page, or repo URL
-    content: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    metadata: Optional[Dict[str, str]] = {}
+    goal: str = Field()
+    found: bool = Field()
+    content: Optional[str] = Field(default=None)
+    location: str = Field(description="File path or commit hash")
+    rationale: str = Field(description="Rationale for the evidence")
+    confidence: float = Field(description="0.0 - 1.0")
+
 
 # -----------------------------
 # Judicial Opinion Models (Judge Layer)
 # -----------------------------
 
-class Criterion(str, Enum):
-    ARCHITECTURE = "architecture"
-    SAFE_TOOLING = "safe_tooling"
-    STRUCTURED_OUTPUT = "structured_output"
-    DIALECTICAL_SYNTHESIS = "dialectical_synthesis"
-    STATE_SYNCHRONIZATION = "state_synchronization"
-
 class JudicialOpinion(BaseModel):
-    judge: str                   # Prosecutor, Defense, TechLead
-    criterion: Criterion
-    score: int                   # 0-10
+    judge: Literal["Prosecutor", "Defense", "TechLead"]
+    criterion_id: str
+    score: int = Field(ge=1, le=5)
     argument: str
-    cited_evidence: List[str]    # List of Evidence IDs
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    cited_evidence: List[str]
+
 
 # -----------------------------
-# Aggregator / Chief Justice Models
+# Chief Justice Output Models
 # -----------------------------
 
 class CriterionResult(BaseModel):
-    criterion: Criterion
-    avg_score: float
-    opinions: List[JudicialOpinion]
-    notes: Optional[str] = None
+    dimension_id: str
+    dimension_name: str
+    final_score: int = Field(ge=1, le=5)
+    judge_opinions: List[JudicialOpinion]
+    dissent_summary: Optional[str] = Field(
+        default=None,
+        description="Required when score variance > 2",
+    )
+    remediation: str = Field(description="Specific file-level instructions for improvement")
+
 
 class AuditReport(BaseModel):
     repo_url: str
+    executive_summary: str
     overall_score: float
     criteria: List[CriterionResult]
-    executive_summary: Optional[str] = None
-    remediation_plan: Optional[str] = None
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    remediation_plan: str
+
 
 # -----------------------------
-# Agent / Runtime State
+# Graph / Agent State (Typed)
 # -----------------------------
 
-class AgentState(BaseModel):
-    detective_evidence: Dict[str, Evidence] = {}
-    judicial_opinions: Dict[str, JudicialOpinion] = {}
-    audit_report: Optional[AuditReport] = None
-    current_node: Optional[str] = None
-    branch_context: Optional[str] = None
-    fan_out_nodes: List[str] = []
-    fan_in_ready: bool = False
+class AgentState(TypedDict):
+    repo_url: str
+    pdf_path: str
+    rubric_dimensions: List[Dict]
+    # Use reducers to prevent parallel agents from overwriting data
+    evidences: Annotated[Dict[str, List[Evidence]], operator.ior]
+    opinions: Annotated[List[JudicialOpinion], operator.add]
+    final_report: Optional[AuditReport]
+
