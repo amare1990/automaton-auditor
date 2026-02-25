@@ -37,10 +37,31 @@ def analyze_python_file(path: Path) -> Dict[str, list | str]:
     try:
         tree = parse_python_file(path)
     except SyntaxError as e:
-        return {"file": str(path), "exports": [], "imports": [], "error": str(e)}
+        return {"file": str(path), "exports": [], "imports": [], "error": str(e), "safety_warnings": []}
+
+    exports = extract_exports(tree)
+    imports = extract_imports(tree)
+
+    # Basic safety checks: look for dynamic execution and common unsafe patterns
+    warnings: List[str] = []
+    for node in ast.walk(tree):
+        # eval/exec usage
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in {"eval", "exec"}:
+                warnings.append(f"uses dynamic execution: {node.func.id}()")
+
+        # subprocess usage detection
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
+                warnings.append(f"calls subprocess.{node.func.attr}")
+
+        # direct open/use of builtin open at top level
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open":
+            warnings.append("uses builtin open(); review for safe paths and sanitization")
 
     return {
         "file": str(path),
-        "exports": extract_exports(tree),
-        "imports": extract_imports(tree),
+        "exports": exports,
+        "imports": imports,
+        "safety_warnings": warnings,
     }
