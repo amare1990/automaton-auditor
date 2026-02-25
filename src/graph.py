@@ -1,75 +1,49 @@
-from typing import Callable, Dict, List
+import asyncio
+from typing import Dict, Any
+from pathlib import Path
+
 from src.state import AgentState
+from src.nodes.detectives import run_detectives
 
-# -----------------------------
-# Node Base Class
-# -----------------------------
-class Node:
-    def __init__(self, name: str, func: Callable[[AgentState], AgentState]):
-        self.name = name
-        self.func = func
-        self.next_nodes: List["Node"] = []
 
-    def add_edge(self, node: "Node"):
-        self.next_nodes.append(node)
+async def run_detective_graph(repo_url: str, pdf_path: str) -> AgentState:
+    """Run the detective fan-out (RepoInvestigator, DocAnalyst, VisionInspector)
+    and then aggregate evidence into the AgentState. Returns final state.
+    """
+    initial_state: AgentState = {
+        "repo_url": repo_url,
+        "pdf_path": pdf_path,
+        "rubric_dimensions": [],
+        "evidences": {},
+        "opinions": [],
+        "final_report": None,
+    }
 
-    def run(self, state: AgentState) -> AgentState:
-        print(f"[Node Start] {self.name}")
-        new_state = self.func(state)
-        for node in self.next_nodes:
-            new_state = node.run(new_state)
-        print(f"[Node End] {self.name}")
-        return new_state
+    # run detectives in parallel
+    gathered = await run_detectives(initial_state)
 
-# -----------------------------
-# StateGraph Orchestrator
-# -----------------------------
-class StateGraph:
-    def __init__(self, initial_state: AgentState):
-        self.state = initial_state
-        self.nodes: Dict[str, Node] = {}
-        self.fan_in_nodes: List[str] = []
+    # evidence already merged by detectives into initial_state['evidences']
+    # mark fan-in complete
+    initial_state.setdefault("evidences", {})
+    initial_state["fan_in_ready"] = True  # type: ignore
 
-    def add_node(self, node: Node):
-        self.nodes[node.name] = node
+    return initial_state
 
-    def add_edge(self, from_node: str, to_node: str):
-        if from_node not in self.nodes or to_node not in self.nodes:
-            raise ValueError(f"Nodes {from_node} or {to_node} not found in graph")
-        self.nodes[from_node].add_edge(self.nodes[to_node])
 
-    def add_fan_in(self, node_names: List[str]):
-        """Declare nodes that must complete before fan-in."""
-        self.fan_in_nodes.extend(node_names)
+def run_sync(repo_url: str, pdf_path: str) -> Dict[str, Any]:
+    """Synchronous helper to run the async graph from non-async callers."""
+    return asyncio.run(run_detective_graph(repo_url, pdf_path))
 
-    def run(self):
-        """Run graph from all root nodes (no incoming edges)."""
-        root_nodes = [node for name, node in self.nodes.items() if name not in self.fan_in_nodes]
-        state = self.state
-        for node in root_nodes:
-            state = node.run(state)
-        return state
 
-# -----------------------------
-# Example Node Functions (Skeletons)
-# -----------------------------
+if __name__ == "__main__":
+    import sys
 
-def repo_investigator(state: AgentState) -> AgentState:
-    print("Running RepoInvestigator...")
-    # Placeholder: integrate git_tools + AST parsing
-    return state
+    if len(sys.argv) < 3:
+        print("Usage: python src/graph.py <repo_url> <pdf_path>")
+        raise SystemExit(2)
 
-def doc_analyst(state: AgentState) -> AgentState:
-    print("Running DocAnalyst...")
-    # Placeholder: integrate pdf_tools + cross-reference
-    return state
+    repo = sys.argv[1]
+    pdf = sys.argv[2]
+    final = run_sync(repo, pdf)
+    print("Detective graph completed. Evidence keys:", list(final.get("evidences", {}).keys()))
 
-def vision_inspector(state: AgentState) -> AgentState:
-    print("Running VisionInspector...")
-    # Placeholder: integrate vision_tools
-    return state
-
-def evidence_aggregator(state: AgentState) -> AgentState:
-    print("Aggregating evidence...")
-    state.fan_in_ready = True
-    return state
