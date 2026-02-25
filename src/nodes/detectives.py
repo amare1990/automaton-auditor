@@ -23,6 +23,18 @@ class RepoInvestigator(DetectiveBase):
         evidence_list: List[Evidence] = []
         repo_url = self.state.get("repo_url")
         if not repo_url:
+            evidence_list.append(
+                Evidence(
+                    goal="git_forensic_analysis",
+                    found=False,
+                    content=None,
+                    location="",
+                    rationale="No repo_url provided to detective",
+                    confidence=0.0,
+                )
+            )
+            self.state.setdefault("evidences", {})
+            self.state["evidences"]["repo_investigator"] = evidence_list
             return evidence_list
 
         # Clone into sandbox
@@ -41,8 +53,26 @@ class RepoInvestigator(DetectiveBase):
             )
             return evidence_list
 
-        commits = repo_tools.extract_git_history(repo_path)
-        graph_info = repo_tools.analyze_graph_structure(repo_path)
+        try:
+            commits = repo_tools.extract_git_history(repo_path)
+        except Exception as exc:
+            commits = []
+            evidence_list.append(
+                Evidence(
+                    goal="git_forensic_analysis",
+                    found=False,
+                    content=None,
+                    location=str(repo_path),
+                    rationale=f"Failed to extract git history: {exc}",
+                    confidence=0.0,
+                )
+            )
+
+        graph_info = {}
+        try:
+            graph_info = repo_tools.analyze_graph_structure(repo_path)
+        except Exception:
+            graph_info = {"add_edge_calls": [], "stategraph_inits": []}
 
         evidence_list.append(
             Evidence(
@@ -79,6 +109,18 @@ class DocAnalyst(DetectiveBase):
         evidence_list: List[Evidence] = []
         pdf_path = self.state.get("pdf_path")
         if not pdf_path:
+            evidence_list.append(
+                Evidence(
+                    goal="doc_parsing",
+                    found=False,
+                    content=None,
+                    location="",
+                    rationale="No pdf_path provided to detective",
+                    confidence=0.0,
+                )
+            )
+            self.state.setdefault("evidences", {})
+            self.state["evidences"]["doc_analyst"] = evidence_list
             return evidence_list
 
         path = Path(pdf_path)
@@ -99,6 +141,20 @@ class DocAnalyst(DetectiveBase):
 
         chunks = doc_tools.ingest_pdf(path)
         hits = []
+        if not chunks:
+            evidence_list.append(
+                Evidence(
+                    goal="doc_parsing",
+                    found=False,
+                    content=None,
+                    location=str(pdf_path),
+                    rationale="PDF parsing returned no chunks (may be corrupted or unreadable)",
+                    confidence=0.0,
+                )
+            )
+            self.state.setdefault("evidences", {})
+            self.state["evidences"]["doc_analyst"] = evidence_list
+            return evidence_list
         keywords = ["Dialectical Synthesis", "Fan-In", "Fan-Out", "Metacognition"]
         for c in chunks:
             for kw in keywords:

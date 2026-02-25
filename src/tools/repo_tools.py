@@ -2,8 +2,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import List, Dict
-import shlex
 import ast
+
+# Keep references to temporary directories so they are not GC-collected
+# immediately which would remove the sandboxed repo on some Python runtimes.
+_SANDBOX_REGISTRY: List[tempfile.TemporaryDirectory] = []
 
 
 def clone_repo_sandbox(repo_url: str) -> Path:
@@ -14,24 +17,29 @@ def clone_repo_sandbox(repo_url: str) -> Path:
     clean up when out of scope if used that way).
     """
     tmp = tempfile.TemporaryDirectory(prefix="repo_sandbox_")
+    _SANDBOX_REGISTRY.append(tmp)
     dest = Path(tmp.name)
     try:
         subprocess.run(["git", "clone", repo_url, str(dest)], check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
-        # propagate a readable error
-        raise RuntimeError(f"git clone failed: {exc.stderr}")
+        raise RuntimeError(f"git clone failed: {exc.stderr or exc}")
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"unexpected error cloning repo: {exc}")
     return dest
 
 
 def extract_git_history(repo_path: Path, limit: int = 200) -> List[Dict[str, str]]:
     """Return commit history as list of dicts: {hash, timestamp, message}.
     """
-    result = subprocess.run(
-        ["git", "-C", str(repo_path), "log", f"-n{limit}", "--pretty=%H|%cI|%s"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "log", f"-n{limit}", "--pretty=%H|%cI|%s"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"git log failed: {exc.stderr or exc}")
     lines = [l for l in result.stdout.splitlines() if l.strip()]
     commits = []
     for line in lines:

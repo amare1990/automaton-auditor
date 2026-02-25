@@ -4,11 +4,25 @@ from pypdf import PdfReader
 
 
 def ingest_pdf(path: Path) -> List[str]:
-    """Read PDF and return a list of text chunks (RAG-lite chunking)."""
-    reader = PdfReader(str(path))
+    """Read PDF and return a list of text chunks (RAG-lite chunking).
+
+    This function is defensive: PDF parsing errors are caught and an empty
+    list is returned so downstream nodes can record evidence about the
+    parsing failure rather than crashing the whole run.
+    """
+    try:
+        reader = PdfReader(str(path))
+    except Exception as exc:
+        # Caller (detective) should interpret an empty list as a parsing failure
+        return []
+
     text = ""
     for page in reader.pages:
-        text += page.extract_text() or ""
+        try:
+            text += page.extract_text() or ""
+        except Exception:
+            # skip pages we cannot extract from
+            continue
 
     # simple chunking by characters; downstream code can do smarter splitting
     chunk_size = 1200
