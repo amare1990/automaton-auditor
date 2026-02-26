@@ -3,30 +3,25 @@ from typing import List
 from pypdf import PdfReader
 
 
-def ingest_pdf(path: Path) -> List[str]:
-    """Read PDF and return a list of text chunks (RAG-lite chunking).
-
-    This function is defensive: PDF parsing errors are caught and an empty
-    list is returned so downstream nodes can record evidence about the
-    parsing failure rather than crashing the whole run.
-    """
+def ingest_pdf(path: Path, chunk_size: int = 1200) -> List[str]:
+    """Read PDF defensively and return character-based text chunks."""
     try:
         reader = PdfReader(str(path))
     except Exception as exc:
-        # Caller (detective) should interpret an empty list as a parsing failure
+        # could record exc as Evidence in detective node
         return []
 
-    text = ""
+    text = []
     for page in reader.pages:
         try:
-            text += page.extract_text() or ""
+            page_text = page.extract_text()
+            if page_text:
+                text.append(page_text)
         except Exception:
-            # skip pages we cannot extract from
             continue
 
-    # simple chunking by characters; downstream code can do smarter splitting
-    chunk_size = 1200
-    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    full_text = "\n".join(text)
+    return [full_text[i:i + chunk_size] for i in range(0, len(full_text), chunk_size)]
 
 
 def extract_file_paths_from_text(text: str) -> List[str]:
