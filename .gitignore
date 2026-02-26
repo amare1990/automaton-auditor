@@ -26,3 +26,6 @@ htmlcov/
 
 # LangSmith traces (large)
 audit/langsmith_logs/*.json
+
+# Ignore rubric.json
+rubric/week2_rubric.json

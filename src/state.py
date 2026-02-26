@@ -69,17 +69,33 @@ class RubricDimension(BaseModel):
     name: str
     target_artifact: str
 
-# -----------------------------
-# Graph / Agent State (Typed)
-# -----------------------------
+# # -----------------------------
+# # Graph / Agent State (Typed)
+# # -----------------------------
 
-class AgentState(TypedDict):
+# class AgentState(TypedDict):
+#     repo_url: str
+#     pdf_path: str
+#     rubric_dimensions: List[RubricDimension]
+#     evidences: Annotated[Dict[str, List[Evidence]], operator.ior]
+#     opinions: Annotated[List[JudicialOpinion], operator.add]
+#     final_report: Optional[AuditReport]
+
+# =====================================================
+# Agent State (LangGraph State)
+# =====================================================
+
+class AgentState(BaseModel):
     repo_url: str
     pdf_path: str
-    rubric_dimensions: List[RubricDimension]
-    evidences: Annotated[Dict[str, List[Evidence]], operator.ior]
-    opinions: Annotated[List[JudicialOpinion], operator.add]
-    final_report: Optional[AuditReport]
+
+    rubric_dimensions: List[RubricDimension] = Field(default_factory=list)
+
+    evidences: Dict[str, List[Evidence]] = Field(default_factory=dict)
+    opinions: List[JudicialOpinion] = Field(default_factory=list)
+
+    final_report: Optional[AuditReport] = None
+    final_report_md: Optional[str] = None
 
 class Config:
     frozen = True
