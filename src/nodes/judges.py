@@ -1,97 +1,128 @@
 # src/nodes/judges.py
-from typing import List
+from __future__ import annotations
+import os
+import json
 import asyncio
+from typing import List
 
-from langchain.chat_models import ChatOpenAI
-from langchain.chains import LLMChain
-from langchain.output_parsers import PydanticOutputParser
+from langchain_openai import ChatOpenAI
 
+from src.config import settings
 from src.state import Evidence, JudicialOpinion, AgentState
 
-# -----------------------------
-# Base Judge Interface
-# -----------------------------
+
+# =========================================================
+# Base Judge
+# =========================================================
 class JudgeBase:
     """
-    Base class for all Judicial agents.
-    Each judge forms a JudicialOpinion based on collected Evidence.
+    Base judicial agent.
+
+    Each judge:
+    - receives full Evidence set
+    - calls LLM
+    - validates JSON into JudicialOpinion
+    - appends to AgentState
     """
-    def __init__(self, state: AgentState, llm_model=None):
+
+    persona_prompt: str = ""
+
+    def __init__(self, state: AgentState):
         self.state = state
-        self.llm_model = llm_model or ChatOpenAI(temperature=0)  # deterministic
+
+        OPENAI_KEY = os.getenv("OPENAI_KEY")
+        if OPENAI_KEY is None:
+            raise ValueError("OPENAI_KEY not set in .env")
+
+        self.llm = ChatOpenAI(
+            model=settings.MODEL,
+            temperature=settings.TEMP,
+            api_key=lambda: OPENAI_KEY,
+        )
+
+    async def _call_llm(self, evidence_text: str) -> JudicialOpinion:
+        """Call LLM and parse output into JudicialOpinion."""
+        prompt = f"""
+{self.persona_prompt}
+
+Return ONLY valid JSON matching JudicialOpinion schema.
+
+Evidence:
+{evidence_text}
+"""
+        for _ in range(2):  # simple retry
+            try:
+                raw = await self.llm.ainvoke(prompt)
+                if isinstance(raw, str):
+                    # parse JSON into Pydantic model
+                    return JudicialOpinion.parse_raw(raw)
+                elif isinstance(raw, dict):
+                    return JudicialOpinion(**raw)
+            except Exception:
+                continue
+
+        raise RuntimeError("Judge failed to produce structured output")
+
 
     async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        """
-        Analyze evidence and produce a JudicialOpinion.
-        Must be implemented by subclasses.
-        """
         raise NotImplementedError
 
 
-# -----------------------------
-# Concrete Judge Agents (LLM-ready)
-# -----------------------------
+# =========================================================
+# Concrete Judges
+# =========================================================
 class Prosecutor(JudgeBase):
-    """Focuses on potential issues, violations, or non-compliance."""
+    persona_prompt = """
+You are the PROSECUTOR.
+Be adversarial and skeptical.
+Score LOW unless evidence is strong.
+"""
+
     async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        parser = PydanticOutputParser(pydantic_object=JudicialOpinion)
-        prompt_text = f"""
-        You are a Prosecutor judge. Review the following evidence and score each rubric criterion (1-5):
-        Evidence: {evidences}
-        Provide argument, score, criterion_id, and cited_evidence as structured output.
-        """
-        chain = LLMChain(llm=self.llm_model, prompt=prompt_text, output_parser=parser)
-        opinion = await chain.arun()
-        self.state.setdefault("opinions", []).append(opinion)
+        text = "\n".join(e.model_dump_json() for e in evidences)
+        opinion = await self._call_llm(text)
+        self.state.opinions.append(opinion)
         return opinion
 
 
 class Defense(JudgeBase):
-    """Focuses on justification, correctness, or compliance mitigation."""
+    persona_prompt = """
+You are the DEFENSE.
+Reward effort, partial correctness, and creative solutions.
+Give benefit of doubt unless evidence proves failure.
+"""
+
     async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        parser = PydanticOutputParser(pydantic_object=JudicialOpinion)
-        prompt_text = f"""
-        You are a Defense judge. Review the following evidence and defend correct practices.
-        Provide argument, score, criterion_id, and cited_evidence as structured output.
-        Evidence: {evidences}
-        """
-        chain = LLMChain(llm=self.llm_model, prompt=prompt_text, output_parser=parser)
-        opinion = await chain.arun()
-        self.state.setdefault("opinions", []).append(opinion)
+        text = "\n".join(e.model_dump_json() for e in evidences)
+        opinion = await self._call_llm(text)
+        self.state.opinions.append(opinion)
         return opinion
 
 
 class TechLead(JudgeBase):
-    """Focuses on technical quality, best practices, and maintainability."""
+    persona_prompt = """
+You are the TECH LEAD.
+Focus on architecture quality, maintainability, modularity.
+Evaluate engineering practicality only.
+"""
+
     async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        parser = PydanticOutputParser(pydantic_object=JudicialOpinion)
-        prompt_text = f"""
-        You are a TechLead judge. Analyze the evidence for technical quality,
-        maintainability, and adherence to best practices.
-        Provide argument, score, criterion_id, and cited_evidence as structured output.
-        Evidence: {evidences}
-        """
-        chain = LLMChain(llm=self.llm_model, prompt=prompt_text, output_parser=parser)
-        opinion = await chain.arun()
-        self.state.setdefault("opinions", []).append(opinion)
+        text = "\n".join(e.model_dump_json() for e in evidences)
+        opinion = await self._call_llm(text)
+        self.state.opinions.append(opinion)
         return opinion
 
 
-# -----------------------------
-# Utility to Run All Judges
-# -----------------------------
-async def run_judges(state: AgentState, llm_model=None) -> List[JudicialOpinion]:
-    """
-    Fan-out all judges concurrently and collect their opinions.
-    """
-    judges = [
-        Prosecutor(state, llm_model),
-        Defense(state, llm_model),
-        TechLead(state, llm_model),
-    ]
-    all_evidence: List[Evidence] = []
-    for sublist in state.get("evidences", {}).values():
-        all_evidence.extend(sublist)
+# =========================================================
+# Parallel Fan-Out Runner
+# =========================================================
+async def run_judges(state: AgentState) -> List[JudicialOpinion]:
+    judges = [Prosecutor(state), Defense(state), TechLead(state)]
 
-    results = await asyncio.gather(*(j.review_evidence(all_evidence) for j in judges))
-    return results
+    all_evidence: List[Evidence] = [
+        e for bucket in state.evidences.values() for e in bucket
+    ]
+
+    return await asyncio.gather(
+        *(j.review_evidence(all_evidence) for j in judges)
+    )
