@@ -26,7 +26,7 @@ class ChiefJusticeNode:
         avg = sum(scores) / len(scores)
         return max(1, min(5, round(avg)))
 
-    def _resolve_conflicts(self, opinions: List[JudicialOpinion]) -> (int, Optional[str]):
+    def _resolve_conflicts(self, opinions: list[JudicialOpinion]) -> tuple[int, Optional[str]]:
         """
         Determine overall average score and optional dissent summary.
         """
