@@ -97,5 +97,7 @@ class AgentState(BaseModel):
     final_report: Optional[AuditReport] = None
     final_report_md: Optional[str] = None
 
+    flat_evidences: List[Evidence] = Field(default_factory=list)
+
 class Config:
     frozen = True
