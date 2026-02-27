@@ -86,17 +86,14 @@ class RubricDimension(BaseModel):
 # =====================================================
 
 class AgentState(BaseModel):
-    repo_url: str
-    pdf_path: str
+    repo_url: str | None = None
+    pdf_path: str | None = None
 
     rubric_dimensions: List[RubricDimension] = Field(default_factory=list)
-
     evidences: Dict[str, List[Evidence]] = Field(default_factory=dict)
     opinions: List[JudicialOpinion] = Field(default_factory=list)
-
     final_report: Optional[AuditReport] = None
     final_report_md: Optional[str] = None
-
     flat_evidences: List[Evidence] = Field(default_factory=list)
 
 class Config:

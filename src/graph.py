@@ -30,10 +30,11 @@ rubric_dims: List[RubricDimension] = [
 # -----------------------------
 
 async def detectives_node(state: AgentState) -> dict:
-    """Run all detective nodes and return the updated fields."""
-    # Since state is Pydantic, we can modify it, but we return a dict for LangGraph
-    await run_detectives(state)
+    """Run detectives that have input to work with."""
+    if state.repo_url or state.pdf_path:
+        await run_detectives(state)  # Detectives internally check which inputs exist
     return {"evidences": state.evidences}
+
 
 async def aggregate_evidence_node(state: AgentState) -> dict:
     """Fan-in node: merge all detective evidence into a flat list."""
@@ -79,42 +80,55 @@ app = graph.compile()
 # -----------------------------
 # Graph Execution
 # -----------------------------
-async def run_graph(repo_url: str, pdf_path: str) -> AgentState:
-    """Initialize state and execute the full audit graph."""
-
-    # Fix: Create a proper instance of AgentState to satisfy the type checker
+async def run_graph(repo_url: str | None = None, pdf_path: str | None = None) -> AgentState:
     initial_state = AgentState(
         repo_url=repo_url,
         pdf_path=pdf_path,
         rubric_dimensions=rubric_dims,
     )
-
-    # Use .ainvoke() with the Pydantic instance
-    # LangGraph will return the final state as an AgentState object (or dict)
     result = await app.ainvoke(initial_state)
+    return result if isinstance(result, AgentState) else AgentState(**result)
 
-    # If result is already an AgentState, return it; otherwise, cast it
-    if isinstance(result, AgentState):
-        return result
-    return AgentState(**result)
-
-def run_sync(repo_url: str, pdf_path: str) -> AgentState:
-    """Synchronous wrapper for non-async callers."""
+def run_sync(repo_url: str | None = None, pdf_path: str | None = None) -> AgentState:
     return asyncio.run(run_graph(repo_url, pdf_path))
 
 # -----------------------------
 # CLI Entry
 # -----------------------------
 if __name__ == "__main__":
+    import sys
 
-    if len(sys.argv) < 3:
-        print("Usage: python src/graph.py <repo_url> <pdf_path>")
+    repo: str | None = None
+    pdf: str | None = None
+
+    # Parse arguments
+    # Usage examples:
+    # python src/graph.py repo_url pdf_path
+    # python src/graph.py repo_url
+    # python src/graph.py "" pdf_path
+    if len(sys.argv) == 3:
+        repo, pdf = sys.argv[1], sys.argv[2]
+        if repo == "":  # allow empty string if only pdf is used
+            repo = None
+    elif len(sys.argv) == 2:
+        arg = sys.argv[1]
+        # Simple heuristic: if it ends with .pdf → treat as PDF
+        if arg.lower().endswith(".pdf"):
+            pdf = arg
+        else:
+            repo = arg
+    else:
+        print("Usage: python src/graph.py <repo_url_or_empty> <pdf_path_optional>")
+        print("Example 1: python src/graph.py https://github.com/user/repo report.pdf")
+        print("Example 2: python src/graph.py https://github.com/user/repo")
+        print("Example 3: python src/graph.py \"\" report.pdf")
         sys.exit(2)
 
-    repo = sys.argv[1]
-    pdf = sys.argv[2]
-
-    print(f"--- Starting Audit for {repo} ---")
+    print(f"--- Starting Audit ---")
+    if repo:
+        print(f"Repo URL: {repo}")
+    if pdf:
+        print(f"PDF Path: {pdf}")
 
     final_result_state = run_sync(repo, pdf)
 
