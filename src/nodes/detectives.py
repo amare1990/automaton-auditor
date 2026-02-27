@@ -17,7 +17,7 @@ class DetectiveBase:
 class RepoInvestigator(DetectiveBase):
     async def collect_evidence(self) -> List[Evidence]:
         evidence_list: List[Evidence] = []
-        repo_url = self.state.get("repo_url")
+        repo_url = self.state.repo_url
         if not repo_url:
             evidence_list.append(Evidence(
                 goal="git_forensic_analysis",
@@ -27,8 +27,10 @@ class RepoInvestigator(DetectiveBase):
                 rationale="No repo_url provided to detective",
                 confidence=0.0
             ))
-            self.state.setdefault("evidences", {})
-            self.state["evidences"]["repo_investigator"] = evidence_list
+            if self.state.evidences is None:
+                self.state.evidences = {}
+
+            self.state.evidences["repo_investigator"] = evidence_list
             return evidence_list
 
         # Clone repo sandbox
@@ -81,14 +83,16 @@ class RepoInvestigator(DetectiveBase):
             confidence=0.8
         ))
 
-        self.state.setdefault("evidences", {})
-        self.state["evidences"]["repo_investigator"] = evidence_list
+        if self.state.evidences is None:
+            self.state.evidences = {}
+        self.state.evidences["repo_investigator"] = evidence_list
         return evidence_list
 
 class DocAnalyst(DetectiveBase):
     async def collect_evidence(self) -> List[Evidence]:
         evidence_list: List[Evidence] = []
-        pdf_path = self.state.get("pdf_path")
+        pdf_path = self.state.pdf_path
+
         if not pdf_path:
             evidence_list.append(Evidence(
                 goal="doc_parsing",
@@ -98,8 +102,9 @@ class DocAnalyst(DetectiveBase):
                 rationale="No pdf_path provided to detective",
                 confidence=0.0
             ))
-            self.state.setdefault("evidences", {})
-            self.state["evidences"]["doc_analyst"] = evidence_list
+            if self.state.evidences is None:
+                self.state.evidences = {}
+            self.state.evidences["repo_investigator"] = evidence_list
             return evidence_list
 
         path = Path(pdf_path)
@@ -112,8 +117,9 @@ class DocAnalyst(DetectiveBase):
                 rationale="PDF not found",
                 confidence=0.0
             ))
-            self.state.setdefault("evidences", {})
-            self.state["evidences"]["doc_analyst"] = evidence_list
+            if self.state.evidences is None:
+                self.state.evidences = {}
+            self.state.evidences["repo_investigator"] = evidence_list
             return evidence_list
 
         chunks = doc_tools.ingest_pdf(path)
@@ -144,8 +150,9 @@ class DocAnalyst(DetectiveBase):
             confidence=0.8
         ))
 
-        self.state.setdefault("evidences", {})
-        self.state["evidences"]["doc_analyst"] = evidence_list
+        if self.state.evidences is None:
+            self.state.evidences = {}
+        self.state.evidences["repo_investigator"] = evidence_list
         return evidence_list
 
 
@@ -164,7 +171,10 @@ class VisionInspector(DetectiveBase):
         evidence_list: List[Evidence] = []
 
         # Look for images under a standard folder (e.g., docs/images)
-        image_dir = Path(self.state.get("repo_url", "")) / "docs" / "images"
+        from pathlib import Path
+
+        repo_url = self.state.repo_url or ""
+        image_dir = Path(repo_url) / "docs" / "images"
         found_images: List[str] = []
 
         if image_dir.exists() and image_dir.is_dir():
@@ -194,8 +204,9 @@ class VisionInspector(DetectiveBase):
                 confidence=0.7
             ))
 
-        self.state.setdefault("evidences", {})
-        self.state["evidences"]["vision_inspector"] = evidence_list
+        if self.state.evidences is None:
+            self.state.evidences = {}
+        self.state.evidences["repo_investigator"] = evidence_list
         return evidence_list
 
 async def run_detectives(state: AgentState) -> List[Evidence]:
@@ -213,8 +224,12 @@ async def run_detectives(state: AgentState) -> List[Evidence]:
     all_evidence = [item for sublist in results for item in sublist]
 
     # merge into shared state under 'evidences'
-    state.setdefault("evidences", {})
-    for d, sublist in zip(["repo_investigator", "doc_analyst", "vision_inspector"], results):
-        state["evidences"][d] = sublist
+    if state.evidences is None:
+        state.evidences = {}
+
+    for d, sublist in zip(
+        ["repo_investigator", "doc_analyst", "vision_inspector"], results
+    ):
+        state.evidences[d] = sublist
 
     return all_evidence
