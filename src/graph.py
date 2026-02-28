@@ -1,16 +1,14 @@
-# src/graph.p
-
 import sys
 import asyncio
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 from langgraph.graph import StateGraph, START, END
 
 from src.state import AgentState, RubricDimension
 from src.nodes.detectives import run_detectives
-from src.nodes.judges import run_judges
+from src.nodes.judges import Prosecutor, Defense, TechLead # Import individual classes
 from src.nodes.justice import ChiefJusticeNode
 
 # -----------------------------
@@ -30,24 +28,40 @@ rubric_dims: List[RubricDimension] = [
 # -----------------------------
 
 async def detectives_node(state: AgentState) -> dict:
-    """Run detectives that have input to work with."""
     if state.repo_url or state.pdf_path:
-        await run_detectives(state)  # Detectives internally check which inputs exist
+        await run_detectives(state)
     return {"evidences": state.evidences}
 
+# --- 1. CONDITIONAL EDGE LOGIC ---
+def route_after_detectives(state: AgentState) -> Literal["EvidenceAggregator", END]:
+    """Gap Fix: Graph-level error edge. If no evidence found, stop early."""
+    total_ev = sum(len(v) for v in state.evidences.values())
+    if total_ev == 0:
+        print("⚠️ No evidence collected. Ending audit early.")
+        return END
+    return "EvidenceAggregator"
 
 async def aggregate_evidence_node(state: AgentState) -> dict:
-    """Fan-in node: merge all detective evidence into a flat list."""
     flat = [ev for bucket in state.evidences.values() for ev in bucket]
     return {"flat_evidences": flat}
 
-async def judges_node(state: AgentState) -> dict:
-    """Run all judge nodes in parallel on aggregated evidence."""
-    await run_judges(state)
-    return {"opinions": state.opinions}
+# --- 2. PARALLEL JUDGE NODES (The Fan-Out) ---
+async def prosecutor_node(state: AgentState) -> dict:
+    judge = Prosecutor(state)
+    opinion = await judge.review_evidence(state.flat_evidences)
+    return {"opinions": [opinion]}
+
+async def defense_node(state: AgentState) -> dict:
+    judge = Defense(state)
+    opinion = await judge.review_evidence(state.flat_evidences)
+    return {"opinions": [opinion]}
+
+async def tech_lead_node(state: AgentState) -> dict:
+    judge = TechLead(state)
+    opinion = await judge.review_evidence(state.flat_evidences)
+    return {"opinions": [opinion]}
 
 async def chief_justice_node(state: AgentState) -> dict:
-    """Run ChiefJustice to synthesize final report."""
     chief = ChiefJusticeNode(state)
     await chief.run()
     return {
@@ -58,24 +72,37 @@ async def chief_justice_node(state: AgentState) -> dict:
 # -----------------------------
 # Build the StateGraph
 # -----------------------------
-# We pass the class itself here
-graph = StateGraph(AgentState)
+builder = StateGraph(AgentState)
 
-# Nodes
-graph.add_node("Detectives", detectives_node)
-graph.add_node("EvidenceAggregator", aggregate_evidence_node)
-graph.add_node("Judges", judges_node)
-graph.add_node("ChiefJustice", chief_justice_node)
+builder.add_node("Detectives", detectives_node)
+builder.add_node("EvidenceAggregator", aggregate_evidence_node)
+builder.add_node("Prosecutor", prosecutor_node)
+builder.add_node("Defense", defense_node)
+builder.add_node("TechLead", tech_lead_node)
+builder.add_node("ChiefJustice", chief_justice_node)
 
-# Flow logic
-graph.add_edge(START, "Detectives") # Set the entry point
-graph.add_edge("Detectives", "EvidenceAggregator")
-graph.add_edge("EvidenceAggregator", "Judges")
-graph.add_edge("Judges", "ChiefJustice")
-graph.add_edge("ChiefJustice", END) # Set the exit point
+# --- 3. UPDATED FLOW LOGIC ---
+builder.add_edge(START, "Detectives")
 
-# Compile the graph
-app = graph.compile()
+# Gap Fix: Conditional Edge
+builder.add_conditional_edges(
+    "Detectives",
+    route_after_detectives
+)
+
+# Fan-Out
+builder.add_edge("EvidenceAggregator", "Prosecutor")
+builder.add_edge("EvidenceAggregator", "Defense")
+builder.add_edge("EvidenceAggregator", "TechLead")
+
+# Fan-In (Parallel nodes converge at ChiefJustice)
+builder.add_edge("Prosecutor", "ChiefJustice")
+builder.add_edge("Defense", "ChiefJustice")
+builder.add_edge("TechLead", "ChiefJustice")
+
+builder.add_edge("ChiefJustice", END)
+
+app = builder.compile()
 
 # -----------------------------
 # Graph Execution
