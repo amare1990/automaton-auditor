@@ -1,4 +1,5 @@
 # src/nodes/justice.py
+
 from typing import List, Optional
 from src.state import AgentState, Evidence, JudicialOpinion, AuditReport, CriterionResult
 

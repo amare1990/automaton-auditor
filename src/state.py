@@ -58,7 +58,7 @@ class CriterionResult(BaseModel):
     remediation: str = Field(description="Concrete, actionable remediation guidance (file-level preferred)")
 
 class AuditReport(BaseModel):
-    repo_url: str
+    repo_url: Optional[str] = None
     executive_summary: str
     overall_score: float = Field(ge=1.0, le=5.0)
     criteria: List[CriterionResult]
