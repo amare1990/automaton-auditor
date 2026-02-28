@@ -69,17 +69,6 @@ class RubricDimension(BaseModel):
     name: str
     target_artifact: str
 
-# # -----------------------------
-# # Graph / Agent State (Typed)
-# # -----------------------------
-
-# class AgentState(TypedDict):
-#     repo_url: str
-#     pdf_path: str
-#     rubric_dimensions: List[RubricDimension]
-#     evidences: Annotated[Dict[str, List[Evidence]], operator.ior]
-#     opinions: Annotated[List[JudicialOpinion], operator.add]
-#     final_report: Optional[AuditReport]
 
 # =====================================================
 # Agent State (LangGraph State)
