@@ -1,103 +1,126 @@
 from __future__ import annotations
 import asyncio
 import json
-from typing import List
+from typing import List,cast, Literal
 
 from src.config import get_llm
 from src.state import Evidence, JudicialOpinion, AgentState
 
 class JudgeBase:
-    persona_prompt: str = ""
+    persona_name: str = "Judge"
+    persona_description: str = ""
+    specific_criteria: str = ""
 
     def __init__(self, state: AgentState):
         self.state = state
-        # Initialize the LLM via our factory
-        self.llm = get_llm(temperature=0.7)
+        # Set temperature slightly lower for more consistent structured output
+        self.llm = get_llm(temperature=0.3)
 
-    async def _call_llm(self, evidence_text: str) -> JudicialOpinion:
-        """Call LLM and parse output into JudicialOpinion safely."""
-        prompt = f"""
-{self.persona_prompt}
-Return ONLY valid JSON matching JudicialOpinion schema.
-Evidence:
-{evidence_text}
-"""
-        # 1. Invoke LLM
-        response = await self.llm.ainvoke(prompt)
-        content = response.content
+    def _generate_prompt(self, evidence_text: str) -> str:
+        return f"""
+        ROLE: {self.persona_name}
+        CRITICAL: The 'judge' field MUST be exactly "{self.persona_name}".
 
-        # 2. Handle the "str | list" type return from LangChain
-        if isinstance(content, list):
-            content_str = "".join([c if isinstance(c, str) else str(c) for c in content])
-        else:
-            content_str = str(content)
+        REQUIRED JSON SCHEMA:
+        {{
+        "judge": "{self.persona_name}",
+        "criterion_id": "architecture_audit",
+        "score": (1-5),
+        "argument": "...",
+        "cited_evidence": ["..."]
+        }}
 
-        # 3. Strip Markdown code blocks if present (e.g., ```json ... ```)
-        clean_json = content_str.strip()
-        if clean_json.startswith("```"):
-            # Remove opening ```json or ``` and closing ```
-            lines = clean_json.splitlines()
-            if len(lines) > 2:
-                clean_json = "\n".join(lines[1:-1])
+        EVIDENCE:
+        {evidence_text}
+        """
 
-        # 4. Parse into Pydantic model
+    async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
+        evidence_text = "\n".join(e.model_dump_json() for e in evidences)
+        prompt = self._generate_prompt(evidence_text)
+
+        # 1. Attempt Structured Output (The "Pro" way)
         try:
-            return JudicialOpinion.model_validate_json(clean_json)
-        except Exception:
-            # Fallback for manual parsing if validation fails
-            data = json.loads(clean_json)
-            return JudicialOpinion(**data)
+            if hasattr(self.llm, "with_structured_output"):
+                structured_llm = self.llm.with_structured_output(JudicialOpinion)
+                opinion = await structured_llm.ainvoke(prompt)
 
-    async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        raise NotImplementedError
+                if isinstance(opinion, JudicialOpinion):
+                    return opinion
+                if isinstance(opinion, dict):
+                    return JudicialOpinion(**opinion)
 
-# Concrete Judge implementations (Prosecutor, Defense, TechLead)
+            # 2. Fallback to standard cleaning if structured output isn't used
+            response = await self.llm.ainvoke(prompt)
+            raw_content = self._ensure_string(response.content)
+            return JudicialOpinion.model_validate_json(self._clean_response(raw_content))
+
+        except Exception as e:
+            print(f"⚠️ {self.persona_name} evaluation failed: {e}. Returning safe fallback.")
+
+            # 3. Final Safety Path: Return a neutral "Inconclusive" opinion
+            # This ensures the function ALWAYS returns a JudicialOpinion.
+            return JudicialOpinion(
+                judge=cast(Literal["Prosecutor", "Defense", "TechLead"], self.persona_name),
+                criterion_id="audit_error",
+                score=3, # Neutral score
+                argument=f"Agent failed to deliberate due to technical error: {str(e)}",
+                cited_evidence=[]
+            )
+
+    def _ensure_string(self, content: str | list) -> str:
+        """Converts potential list of content blocks into a single string."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            # Join text parts, ignore dicts/images for JSON parsing
+            return "".join([block if isinstance(block, str) else block.get("text", "")
+                          for block in content if isinstance(block, (str, dict))])
+        return str(content)
+
+    def _clean_response(self, content: str) -> str:
+        """Strip markdown and whitespace."""
+        clean = content.strip()
+        if clean.startswith("```json"):
+            clean = clean.split("```json")[1].split("```")[0]
+        elif clean.startswith("```"):
+            clean = clean.split("```")[1].split("```")[0]
+        return clean.strip()
+
+    def _manual_parse(self, content: str) -> JudicialOpinion:
+        """Emergency fallback for non-structured responses."""
+        data = json.loads(self._clean_response(content))
+        return JudicialOpinion(**data)
+
+
 class Prosecutor(JudgeBase):
-    persona_prompt = "You are the PROSECUTOR. Be adversarial and skeptical."
-    async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        text = "\n".join(e.model_dump_json() for e in evidences)
-        opinion = await self._call_llm(text)
-        self.state.opinions.append(opinion)
-        return opinion
+    persona_name = "Prosecutor"
+    persona_description = "You are a skeptical Forensic Auditor. Your job is to find gaps, missing documentation, and architectural inconsistencies."
+    specific_criteria = "Look for: 'False' found flags in evidence, missing Pydantic schemas, and shallow git history."
 
 class Defense(JudgeBase):
-    persona_prompt = "You are the DEFENSE. Give benefit of doubt."
-    async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        text = "\n".join(e.model_dump_json() for e in evidences)
-        opinion = await self._call_llm(text)
-        self.state.opinions.append(opinion)
-        return opinion
+    persona_name = "Defense"
+    persona_description = "You are the Developer Advocate. You highlight implementation complexity, successful tool integration, and adherence to requirements."
+    specific_criteria = "Look for: Successful AST parsing, complex StateGraph edges, and clear rationale in evidence."
 
 class TechLead(JudgeBase):
-    persona_prompt = "You are the TECH LEAD. Focus on engineering practicality."
-    async def review_evidence(self, evidences: List[Evidence]) -> JudicialOpinion:
-        text = "\n".join(e.model_dump_json() for e in evidences)
-        opinion = await self._call_llm(text)
-        self.state.opinions.append(opinion)
-        return opinion
+    persona_name = "Tech Lead"
+    persona_description = "You are a pragmatic Systems Architect. You care about 'Substance over Buzzwords' and engineering scalability."
+    specific_criteria = "Look for: Fan-In/Fan-Out patterns, schema enforcement, and effective use of LangGraph."
 
-# Run all judges and collect opinions
+# --- Orchestration ---
 
 async def run_judges(state: AgentState) -> List[JudicialOpinion]:
+    """Runs judges. Note: In the Graph version, we move this to individual nodes."""
     judges = [Prosecutor(state), Defense(state), TechLead(state)]
-
-    all_evidence: List[Evidence] = [
-        e for bucket in state.evidences.values() for e in bucket
-    ]
+    all_evidence = [e for bucket in state.evidences.values() for e in bucket]
 
     results = []
     for judge in judges:
-        try:
-            # Run one at a time to stay under the Free Tier rate limit
-            opinion = await judge.review_evidence(all_evidence)
-            results.append(opinion)
-
-            # 2-second pause between judges to let the quota reset
-            print(f"--- {judge.__class__.__name__} complete, waiting for quota... ---")
-            await asyncio.sleep(2)
-
-        except Exception as e:
-            print(f"Error in {judge.__class__.__name__}: {e}")
-            continue
+        print(f"--- {judge.persona_name} is deliberating... ---")
+        opinion = await judge.review_evidence(all_evidence)
+        state.opinions.append(opinion)
+        results.append(opinion)
+        # Quota protection for Free Tier
+        await asyncio.sleep(1.5)
 
     return results
