@@ -3,7 +3,7 @@ name = "automaton-auditor"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = [
     "gitpython>=3.1.46",
     "langchain>=1.2.10",
