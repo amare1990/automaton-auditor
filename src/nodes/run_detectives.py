@@ -1,3 +1,6 @@
+# Run detectives and collect evidence
+# src/nodes/run_detectives.py
+
 import asyncio
 import argparse
 import os
