@@ -20,6 +20,5 @@ report:
 # 4. Helper to see how to use this Makefile
 help:
 	@echo "Usage examples:"
-	@echo "  make graph REPO=. PDF=reports/interim_report.pdf"
-	@echo "  make graph REPO=https://github.com/user/repo"
-	@echo "  make report REPO=. PDF=reports/interim_report.pdf"
+	@echo "  make graph REPO="." PDF=reports/final_report.pdf"
+	@echo "  make report REPO=https://github.com/user/repo PDF=\"reports/Final Report.pdf\""

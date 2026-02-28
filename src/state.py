@@ -80,7 +80,7 @@ class AgentState(BaseModel):
 
     rubric_dimensions: List[RubricDimension] = Field(default_factory=list)
     evidences: Dict[str, List[Evidence]] = Field(default_factory=dict)
-    opinions: List[JudicialOpinion] = Field(default_factory=list)
+    opinions: Annotated[List[JudicialOpinion], operator.add] = Field(default_factory=list)
     final_report: Optional[AuditReport] = None
     final_report_md: Optional[str] = None
     flat_evidences: List[Evidence] = Field(default_factory=list)
