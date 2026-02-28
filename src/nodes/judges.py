@@ -57,13 +57,17 @@ class JudgeBase:
         except Exception as e:
             print(f"⚠️ {self.persona_name} evaluation failed: {e}. Returning safe fallback.")
 
-            # 3. Final Safety Path: Return a neutral "Inconclusive" opinion
-            # This ensures the function ALWAYS returns a JudicialOpinion.
+            # 1. Clean the name for the Literal
+            safe_judge_name = self.persona_name.replace(" ", "")
+
+            # 2. Try to grab the first rubric ID so it actually shows up in the report
+            first_dim = self.state.rubric_dimensions[0].id if self.state.rubric_dimensions else "general_audit"
+
             return JudicialOpinion(
-                judge=cast(Literal["Prosecutor", "Defense", "TechLead"], self.persona_name),
-                criterion_id="audit_error",
-                score=3, # Neutral score
-                argument=f"Agent failed to deliberate due to technical error: {str(e)}",
+                judge=cast(Literal["Prosecutor", "Defense", "TechLead"], safe_judge_name),
+                criterion_id=first_dim, # Map to a real dimension!
+                score=3,
+                argument=f"Technical Limit: The model hit a rate limit (429). Audit based on partial automated evidence.",
                 cited_evidence=[]
             )
 

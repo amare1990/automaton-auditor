@@ -2,7 +2,7 @@ import sys
 import asyncio
 import json
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Union
 
 from langgraph.graph import StateGraph, START, END
 
@@ -33,12 +33,12 @@ async def detectives_node(state: AgentState) -> dict:
     return {"evidences": state.evidences}
 
 # --- 1. CONDITIONAL EDGE LOGIC ---
-def route_after_detectives(state: AgentState) -> Literal["EvidenceAggregator", END]:
+def route_after_detectives(state: AgentState) -> str:
     """Gap Fix: Graph-level error edge. If no evidence found, stop early."""
     total_ev = sum(len(v) for v in state.evidences.values())
     if total_ev == 0:
         print("⚠️ No evidence collected. Ending audit early.")
-        return END
+        return END # LangGraph recognizes the END object
     return "EvidenceAggregator"
 
 async def aggregate_evidence_node(state: AgentState) -> dict:
