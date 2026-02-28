@@ -20,7 +20,7 @@ def get_llm(model: Optional[str] = None, temperature: float = 0.2, **kwargs: Any
     if PROVIDER == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        raw_api_key = os.getenv("GOOGLE_API_KEY")
+        raw_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not raw_api_key:
             raise ValueError("GOOGLE_API_KEY not set in .env")
 

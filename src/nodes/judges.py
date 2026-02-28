@@ -76,7 +76,28 @@ class TechLead(JudgeBase):
         self.state.opinions.append(opinion)
         return opinion
 
+# Run all judges and collect opinions
+
 async def run_judges(state: AgentState) -> List[JudicialOpinion]:
     judges = [Prosecutor(state), Defense(state), TechLead(state)]
-    all_evidence: List[Evidence] = [e for bucket in state.evidences.values() for e in bucket]
-    return await asyncio.gather(*(j.review_evidence(all_evidence) for j in judges))
+
+    all_evidence: List[Evidence] = [
+        e for bucket in state.evidences.values() for e in bucket
+    ]
+
+    results = []
+    for judge in judges:
+        try:
+            # Run one at a time to stay under the Free Tier rate limit
+            opinion = await judge.review_evidence(all_evidence)
+            results.append(opinion)
+
+            # 2-second pause between judges to let the quota reset
+            print(f"--- {judge.__class__.__name__} complete, waiting for quota... ---")
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            print(f"Error in {judge.__class__.__name__}: {e}")
+            continue
+
+    return results
