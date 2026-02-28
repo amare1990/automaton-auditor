@@ -1,58 +1,136 @@
-Automaton Auditor — Interim Detective Runner
+---
 
-Quickstart
+# Hierarchical Multi-Agent Repository and PDF Document Auditor
 
-1. Create and activate a Python virtual environment:
+**Author:** Amare Kassa
+**Date:** February 28, 2026
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
+---
+
+## Overview
+
+The **Automaton Auditor** is a deterministic, hierarchical multi-agent system designed to perform automated audits of software repositories and associated documentation. It generates structured evidence-backed technical reports, following a **digital courtroom architecture**:
+
+**Detectives → Judges → Chief Justice**
+
+- Detectives gather factual evidence (git history, PDF content, code structure, images)
+- Judges reason over the collected evidence
+- Chief Justice synthesizes verdicts and remediation suggestions
+
+The system is **designed for production-grade execution**, supporting parallelism, offline-safe operation, and reproducibility.
+
+---
+
+## Repository Structure
+
+```text
+.
+├── src/                 # Core source code
+│   ├── graph.py         # LangGraph orchestration
+│   ├── nodes/           # Detectives, Judges, ChiefJustice
+│   ├── tools/           # AST, git, PDF, and vision tools
+├── reports/             # Generated audit reports
+├── rubric/              # Machine-readable evaluation rubrics
+├── .env.examples        # Example environment configuration
+├── Dockerfile           # Optional containerized execution
+├── Makefile             # Build/test utilities
+└── README.md            # This file
 ```
 
-2. Install the package (uses `pyproject.toml`) — using `uv` package manager:
+---
+
+## Prerequisites
+
+1. **Python 3.10+**
+2. **uv package manager** installed
+3. **Git** installed and accessible from the command line
+
+---
+
+## Setup Instructions
+
+1. Clone the repository:
+
+```bash
+git clone <repo-url>
+cd <repo-directory>
+```
+
+2. Install dependencies via `uv`:
 
 ```bash
 uv install
 ```
 
-If you prefer `pip` as a fallback you can still run:
+3. Setup environment variables:
 
 ```bash
-python -m pip install -e .
+cp .env.examples .env
+# Then edit .env to provide API keys or configuration values if needed
 ```
 
-3. Copy `.env.example` to `.env` and add your `OPENAI_API_KEY` (or other provider keys):
+---
+
+## Running the Multi-Agent Swarm
+
+The system can execute audits against any repository URL and optional PDF report.
+
+### 1. Run Detectives Only (evidence collection)
 
 ```bash
-cp .env.example .env
-# edit .env
+uv run python -m src.nodes.run_detectives --repo "<target-repo-path-or-url>" --pdf "<report-path>"
 ```
 
-Run the detective graph (interim):
+**Output:** Evidence buckets for RepoInvestigator, DocAnalyst, and VisionInspector.
+
+---
+
+### 2. Run Full Audit (Detectives → Judges → ChiefJustice)
 
 ```bash
-python src/graph.py <github_repo_url> <path/to/interim_report.pdf>
+uv run python -m src.graph "<target-repo-path-or-url>" "<report-path>"
 ```
 
-What this does (interim):
+**Behavior:**
 
-- Clones the target repo into a temporary sandbox
-- Extracts git history and performs lightweight AST scans for StateGraph wiring
-- Parses the provided PDF report and extracts key terms and referenced file paths
-- Aggregates evidence into a typed `AgentState` (see `src/state.py`)
+- Detectives execute concurrently, collecting structured evidence
+- Judges reason over evidence (execution may be serialized locally due to API limits)
+- Chief Justice deterministically synthesizes a report
 
-Next steps to complete the Week 2 interim submission:
+**Output:**
 
-- Implement Judge personas (`src/nodes/judges.py`) that return `JudicialOpinion` objects
-- Implement the Chief Justice synthesis node and Markdown report generation
-- (Optional) integrate `vision_tools` image analysis for diagrams
+- JSON reports in `reports/`
+- Markdown report preview, including scores, verdicts, and remediation
 
-Files of interest:
+---
 
-- `src/state.py` — typed Pydantic models and `AgentState` TypedDict
-- `src/tools/repo_tools.py` — sandboxed clone + git/AST helpers
-- `src/tools/doc_tools.py` — PDF ingestion + simple path extraction
-- `src/nodes/detectives.py` — RepoInvestigator, DocAnalyst, VisionInspector
-- `src/graph.py` — runner for detective fan-out/fan-in
+## Handling API Limits
 
-If you want, I can implement the judges and ChiefJustice synthesis next.
+- Judges can execute in parallel in production
+- Local testing may serialize judicial calls due to external API quotas (`RESOURCE_EXHAUSTED`)
+- Detectives are deterministic and do not depend on LLM calls
+
+---
+
+## Environment Variables
+
+Your `.env` file can include:
+
+```text
+GEMINI_API_KEY=<your-api-key>
+UV_LOG_LEVEL=INFO
+REPO_SANDBOX_PATH=/tmp/repo_sandbox
+PDF_DEFAULT_PATH=reports/Final_Report.pdf
+```
+
+Adjust according to your environment and API quotas.
+
+---
+
+## Notes
+
+- The system is **offline-safe**: detects missing PDFs or repo issues gracefully
+- Evidence collection is reproducible and type-validated via **Pydantic schemas**
+- Swarm execution is CI-friendly, cost-aware, and horizontally scalable
+
+---

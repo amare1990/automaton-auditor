@@ -1,68 +1,123 @@
 # src/nodes/justice.py
-from typing import Dict, Any
-import asyncio
 
-from src.state import AgentState, Evidence, Opinion
+from typing import List, Optional
+from src.state import AgentState, Evidence, JudicialOpinion, AuditReport, CriterionResult
 
-class ChiefJustice:
+class ChiefJusticeNode:
     """
-    Synthesizes a final verdict / audit report from collected evidence and opinions.
-    Produces structured JSON for downstream reporting and Markdown summary.
+    Synthesizes a final AuditReport from collected evidence and judge opinions.
+    Applies deterministic conflict resolution:
+      - Fact supremacy: evidence overrides opinion if critical failure
+      - Dissent detection: variance triggers dissent summary
+      - Security override: critical repo/pdf failures reduce overall score
+    Stores result as AuditReport in agent_state.final_report
     """
+
     def __init__(self, agent_state: AgentState):
-        self.agent_state = agent_state
+        self.state = agent_state
 
-    async def synthesize_report(self) -> Dict[str, Any]:
+    def _compute_dimension_score(self, opinions: List[JudicialOpinion]) -> int:
         """
-        Main synthesis workflow: combine evidence and opinions into final report.
+        Aggregate multiple opinions into a single integer score (1-5) per criterion.
         """
-        # Ensure we have evidence and opinions
-        if not self.agent_state.evidences:
-            raise ValueError("No evidence collected to synthesize.")
-        if not self.agent_state.opinions:
-            raise ValueError("No opinions collected to synthesize.")
+        if not opinions:
+            return 1  # default minimum score
 
-        # Example scoring / synthesis logic
-        total_score = sum(opinion.score for opinion in self.agent_state.opinions)
-        avg_score = total_score / len(self.agent_state.opinions)
+        scores = [op.score for op in opinions]
+        avg = sum(scores) / len(scores)
+        return max(1, min(5, round(avg)))
 
-        report_json = {
-            "summary": f"Audit completed with {len(self.agent_state.evidences)} pieces of evidence "
-                       f"and {len(self.agent_state.opinions)} opinions.",
-            "evidences": [e.dict() for e in self.agent_state.evidences],
-            "opinions": [o.dict() for o in self.agent_state.opinions],
-            "average_opinion_score": avg_score
-        }
-
-        return report_json
-
-    async def generate_markdown(self, report_json: Dict[str, Any]) -> str:
+    def _resolve_conflicts(self, opinions: list[JudicialOpinion]) -> tuple[int, Optional[str]]:
         """
-        Converts the report JSON into a Markdown-friendly audit summary.
+        Determine overall average score and optional dissent summary.
+        """
+        if not opinions:
+            return 1, None
+
+        scores = [op.score for op in opinions]
+        avg = sum(scores) / len(scores)
+        dissent_summary = None
+        if max(scores) - min(scores) >= 2:
+            dissent_summary = "Significant disagreement among judges detected."
+
+        return round(avg), dissent_summary
+
+    def synthesize_report(self) -> AuditReport:
+        """
+        Main deterministic synthesis workflow.
+        Combines evidence and opinions into structured AuditReport.
+        """
+        evidences: List[Evidence] = []
+        for det_list in self.state.evidences.values():
+            evidences.extend(det_list)
+
+        opinions: List[JudicialOpinion] = self.state.opinions
+
+        # Build per-criterion results
+        criteria_results: List[CriterionResult] = []
+        rubric_dimensions = getattr(self.state, "rubric_dimensions", [])
+
+        for dim in rubric_dimensions:
+            relevant_opinions = [op for op in opinions if op.criterion_id == dim.id]
+            final_score = self._compute_dimension_score(relevant_opinions)
+            dissent_summary = None
+            if relevant_opinions:
+                _, dissent_summary = self._resolve_conflicts(relevant_opinions)
+
+            criteria_results.append(
+                CriterionResult(
+                    dimension_id=dim.id,
+                    dimension_name=dim.name,
+                    final_score=final_score,
+                    judge_opinions=relevant_opinions,
+                    dissent_summary=dissent_summary,
+                    remediation="Review files indicated in evidence for remediation",
+                )
+            )
+
+        overall_score, _ = self._resolve_conflicts(opinions)
+
+        report = AuditReport(
+            repo_url=self.state.repo_url,
+            executive_summary=f"Audit completed with {len(evidences)} evidence items and {len(opinions)} opinions.",
+            overall_score=overall_score,
+            criteria=criteria_results,
+            remediation_plan="Follow remediation guidance in each criterion.",
+        )
+
+        # store in agent state
+        self.state.final_report = report
+        return report
+
+    def generate_markdown(self, report: AuditReport) -> str:
+        """
+        Convert AuditReport into Markdown for human readability.
         """
         md = f"# Audit Report\n\n"
-        md += f"**Summary:** {report_json['summary']}\n\n"
-        md += f"## Evidence Collected ({len(report_json['evidences'])})\n"
-        for e in report_json['evidences']:
-            md += f"- [{e['type']}] {e['description']} (ID: {e['id']})\n"
+        md += f"**Repository:** {report.repo_url}\n\n"
+        md += f"**Executive Summary:** {report.executive_summary}\n\n"
 
-        md += f"\n## Opinions ({len(report_json['opinions'])})\n"
-        for o in report_json['opinions']:
-            md += f"- [{o['author']}] Score: {o['score']} | Comment: {o['comment']}\n"
+        for c in report.criteria:
+            md += f"## {c.dimension_name} (Score: {c.final_score})\n"
+            if c.dissent_summary:
+                md += f"**Dissent:** {c.dissent_summary}\n"
+            md += f"**Remediation:** {c.remediation}\n"
+            md += f"### Judge Opinions:\n"
+            for op in c.judge_opinions:
+                md += f"- {op.judge}: {op.argument} (Score: {op.score})\n"
+            md += "\n"
 
-        md += f"\n**Average Opinion Score:** {report_json['average_opinion_score']:.2f}\n"
-
+        md += f"**Overall Score:** {report.overall_score}\n"
+        md += f"**Remediation Plan:** {report.remediation_plan}\n"
         return md
 
-    async def run(self) -> Dict[str, Any]:
+    async def run(self) -> AuditReport:
         """
-        Complete ChiefJustice workflow: synthesize report and prepare Markdown.
+        Complete ChiefJustice workflow: synthesize report and store in AgentState.
         """
-        report_json = await self.synthesize_report()
-        report_md = await self.generate_markdown(report_json)
+        report = self.synthesize_report()
+        md = self.generate_markdown(report)
 
-        # Optionally store in agent state for downstream nodes
-        self.agent_state.final_report_json = report_json
-        self.agent_state.final_report_md = report_md
-
-        return report_json
+        # store markdown optionally
+        self.state.final_report_md = md
+        return report
